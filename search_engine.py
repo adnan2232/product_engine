@@ -1,13 +1,14 @@
+from typing import Union
 import pandas as pd
 import numpy as np
 import re
 
 class SearchEngine:
 
-    def __init__(self,df_or_path: str|pd.DataFrame, index_col:int=-1, replacement: dict[re.Pattern,str] = dict()) -> None:
+    def __init__(self,df_or_path: Union[str,pd.DataFrame], index_col:int=-1, replacement: dict[re.Pattern,str] = None) -> None:
 
         self.df: pd.DataFrame
-        self.replacement = replacement
+        self.replacement = replacement if replacement else dict()
 
         if isinstance(df_or_path,str):
             try:
@@ -18,10 +19,10 @@ class SearchEngine:
                     self.set_df_parquet(df_or_path)
 
                 else:
-                    raise Exception("Looks like your path file extension is not supported")
+                    raise FileNotFoundError("Looks like your path file extension is not supported")
 
             except IndexError:
-                raise Exception("File extension not found in your path")
+                raise IndexError("File extension not found in your path")
         
         elif isinstance(df_or_path,pd.DataFrame):
             self.set_df(df_or_path)
@@ -54,7 +55,7 @@ class SearchEngine:
 
         return set(query.strip().split(" "))
 
-    def exact_match(self, category: str, bag_of_words: list|set|tuple, df: pd.DataFrame = pd.DataFrame()) -> pd.DataFrame:
+    def exact_match(self, category: str, bag_of_words: Union[list,set,tuple], df: pd.DataFrame = pd.DataFrame()) -> pd.DataFrame:
         
         assert hasattr(self,"df") or not df.empty, "No data to query on please set data frame using set_df_parquet, set_df_csv or set_df or pass data frame"
 
