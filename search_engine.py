@@ -11,6 +11,7 @@ class SearchEngine:
         self.replacement = replacement if replacement else dict()
 
         if isinstance(df_or_path,str):
+            
             try:
                 if df_or_path.split(".")[1] == "csv":
                     self.set_df_csv(df_or_path,index_col=index_col)
