@@ -1,75 +1,100 @@
+from Levenshtein import ratio
+from nltk.stem import WordNetLemmatizer
 from typing import Union
 import pandas as pd
 import numpy as np
+import nltk
 import re
 
 class SearchEngine:
+    def __init__(self) -> None:
+        nltk.download("wordnet")
+        self.lemma = WordNetLemmatizer()
 
-    def __init__(self,df_or_path: Union[str,pd.DataFrame], index_col:int=-1, replacement: dict[re.Pattern,str] = None) -> None:
+    def read_df_parquet(self, path: str) -> pd.DataFrame:
+        df = pd.read_parquet(path)
+        return df
 
-        self.df: pd.DataFrame
-        self.replacement = replacement if replacement else dict()
-
-        if isinstance(df_or_path,str):
-            
-            try:
-                if df_or_path.split(".")[1] == "csv":
-                    self.set_df_csv(df_or_path,index_col=index_col)
-
-                elif df_or_path.split(".")[1] == "parquet":
-                    self.set_df_parquet(df_or_path)
-
-                else:
-                    raise FileNotFoundError("Looks like your path file extension is not supported")
-
-            except IndexError:
-                raise IndexError("File extension not found in your path")
-        
-        elif isinstance(df_or_path,pd.DataFrame):
-            self.set_df(df_or_path)
-        
-        else:
-            raise Exception("Passed df_or_path should be path to data or a dataframe")
-
-    def set_df(self,df: pd.DataFrame) -> None:
-        self.df = df
-
-    def set_df_parquet(self, path: str) -> None:
-
-        self.df = pd.read_parquet(path)
-
-    def set_df_csv(self, path: str, index_col:int=-1) -> None:
+    def read_df_csv(self, path: str, index_col:int=-1) -> pd.DataFrame:
 
         if index_col >-1:
-            self.df = pd.read_csv(path,index_col=index_col)
+            df = pd.read_csv(path,index_col=index_col)
         else:
-            self.df = pd.read_csv(path)
-
-    def text_to_set(self,query: str, replacement: dict[re.Pattern,str] ={}) -> set[str]:
-
-        if not replacement:
-            replacement = self.replacement
-
-        for key,val in replacement.items():
-
-            query = re.sub(key,val,query)
-
-        return set(query.strip().split(" "))
-
-    def exact_match(self, category: str, bag_of_words: Union[list,set,tuple], df: pd.DataFrame = pd.DataFrame()) -> pd.DataFrame:
+            df = pd.read_csv(path)
         
-        assert hasattr(self,"df") or not df.empty, "No data to query on please set data frame using set_df_parquet, set_df_csv or set_df or pass data frame"
+        return df
 
-        if df.empty:
-            df = self.df
+    #max_win_score uses window size of category words and calculate Levenshtein similarity ratio (Windows shrink at the end)
+    #if score is >= 0.5 particuar brand df is return else all brands df
+    def max_win_score(self ,cats:str, txt_ls:list) -> dict[str,float]:
+        txt_n = len(txt_ls)
+        cat_scores = {cat:0 for cat in cats}
+        for cat in cats:
+            cat_ls = cat.split(" ")
+            n = len(cat_ls)
 
-        ind = df[category].isin(bag_of_words)
+            for i in range(txt_n):
+                temp = " ".join(txt_ls[i:i+n])
+                cat_scores[cat] = max(cat_scores[cat],ratio(cat.lower(),temp.lower()))
 
+        return cat_scores
+
+    #average_score take cartesian cross product, calculate Levenshtein similarity ratio
+    #and average max similarity ratio for each item
+    #if score is >= 0.5 particuar brand df is return else all brands df
+    def average_score(self,cats: str,txt_ls:list) -> dict[str,float]:
+
+        cat_scores = {cat:0 for cat in cats}
+        for cat in cats:
+            cat_ls = cat.split(" ")
+            score = {word:0 for word in cat_ls}
+            
+            for word_cat in cat_ls:
+                for word_txt in txt_ls:
+                    score[word_cat] = max(score[word_cat],ratio(word_cat,word_txt))
+        
+            cat_scores[cat] = np.mean(list(score.values()))
+    
+        return cat_scores
+                
+
+    #exact_match function first try exact matching of brand name in search text and return that brand or  dataframe
+    #if no exact match found, partial match is done using average_score or max_win_score
+
+    def exact_match(self, df:pd.DataFrame, column_name:str, txt:str, method:str ="average_score")->pd.DataFrame:
+        txt_ls = txt.lower().split(" ")
+        ind = df[column_name].isin(txt_ls)
+        
         if ind.any():
-            return df.loc[ind].copy()
+            return df[ind]
+        
+        if method=="average_score":
+            tp = self.average_score(df[column_name].unique(),txt_ls)
+        else:
+            tp = self.max_win_score(df[column_name].unique(),txt_ls)
+            
+        ele = max(tp.items(),key= lambda x:x[1])
+        return df.loc[df[column_name]==ele[0]].copy() if ele[1]>=0.5 else df.copy()
 
-        return df.copy()
+    #partial match return top_scoring product_lines using average_score or max_win_score
+    def partial_match(self, df:pd.DataFrame, column_name:str ,txt:str ,top_ele:int=3, method:str="average_score", lemmatize:bool=True)-> pd.DataFrame:
+        
+        if lemmatize:
+            txt_ls = [self.lemma.lemmatize(word) for word in txt.lower().split(" ")]
+        else:
+            txt_ls = txt.lower().split(" ")
 
+        if method=="average_score":
+            tp = self.average_score(df[column_name].unique(),txt_ls)
+        elif method=="max_win_score":
+            tp = self.max_win_score(df[column_name].unique(),txt_ls)
+        else:
+            raise ValueError(f"No scoring metircs name: {method}\nAvailable scoring metrics are: average_score and max_win_score")
+            
+        elements = [x for x,y in sorted(tp.items(),key = lambda x: x[1],reverse=True)[:top_ele]]
+        ind = df[column_name].isin(elements)
+        
+        return df[ind].copy()
 
 
     
