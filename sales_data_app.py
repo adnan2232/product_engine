@@ -3,9 +3,14 @@ import pandas as pd
 
 
 def retrieve_result(df: pd.DataFrame, text: str) -> pd.DataFrame:
+    abbrevations = {
+        "cooler":"cooling appliance",
+        "heater":"heating appliance",
+        "headset":"headphone",
+    }
     df_brand = se.exact_match(df, "brand_lower", text, method="max_win_score")
     df_product = se.partial_match(
-        df_brand, "product_line_clean", text, method="combine_score"
+        df_brand, "product_line_clean", text, method="combine_score", abb=abbrevations
     )
     df_res = se.inverse_partial_match(df_product, "sku", text)
     return df_res
