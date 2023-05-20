@@ -164,7 +164,7 @@ class ProductMatcher:
                 
         return cat_alias
     
-    def sku_search(self,query:str,brand_filter:set[str],cat_filter:set[str])->pd.Index:
+    def sku_search(self,query:str,brand_filter:set[str],cat_filter:set[str],wo_score:int)->pd.Index:
         
         search_space = self.df.loc[
             self.df.apply(
@@ -192,25 +192,23 @@ class ProductMatcher:
         total = 0
         
         def score(str1,str2):
-            tokens = str1.split(' ')
-            total = 0
-            for token in tokens:
-                total += fuzz.partial_ratio(token,str1)
+            #tokens = str1.split(' ')
+            #total = 0
+            #for token in tokens:
+            #    total += fuzz.partial_ratio(token,str1)
             
-            return total/len(tokens)
+            #return total/len(tokens)
+            return fuzz.partial_token_sort_ratio(str1,str2)
             
-        
-        return search_space.loc[
-            search_space['sku'].apply(
-                lambda sku: score(query,sku)>= threshold
-            )
-        ].index
+        search_space['score'] = search_space['sku'].apply(
+            lambda sku: score(query,sku)*wo_score
+        )
+        return search_space
         
         
         
     
     def state_space_search(self,query:str,mini_fetch:int)->pd.DataFrame:
-        import heapq
         
         brands = self.brand_matcher(query)
         brand_cat_q = []
@@ -218,14 +216,14 @@ class ProductMatcher:
         for brand,brand_score in brands:
             cats = self.cat_matcher(query,{brand,})
             for cat,cat_score in cats:
-                heapq.heappush(brand_cat_q,(-brand_score*cat_score,(brand,cat)))
+                brand_cat_q.append((brand_score*cat_score,brand,cat))
         
-        res_idx = []
+        res =  pd.DataFrame()
     
-        while(brand_cat_q and len(res_idx)<mini_fetch):
-            score,(brand,cat) = heapq.heappop(brand_cat_q)
-            res_idx.extend(self.sku_search(query,{brand,},{cat,}))
+        while(brand_cat_q):
+            score,brand,cat = brand_cat_q.pop()
+            res = pd.concat([res,self.sku_search(query,{brand,},{cat,},score)])
          
-        return self.df.iloc[np.array(res_idx)-1]
+        return res.sort_values('score',ascending=False).head(mini_fetch)
             
             
